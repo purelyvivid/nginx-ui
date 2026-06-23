@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:18.4
+    environment:
+      POSTGRES_DB: nginx_manager
+      POSTGRES_USER: nginx_manager
+      POSTGRES_PASSWORD: nginx_manager_password
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nginx_manager -d nginx_manager"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - nginx-generated:/etc/nginx/generated
+      - nginx-certs:/etc/nginx/certs:ro
+      - nginx-runtime:/etc/nginx/runtime
+    ports:
+      - "8080-8099:8080-8099"
+      - "8443-8459:8443-8459"
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    environment:
+      PORT: "4000"
+      DATABASE_URL: postgres://nginx_manager:nginx_manager_password@postgres:5432/nginx_manager
+      NGINX_GENERATED_DIR: /etc/nginx/generated/conf.d
+      NGINX_CERT_DIR: /etc/nginx/certs
+      NGINX_PID_FILE: /etc/nginx/runtime/nginx.pid
+      PUBLIC_PORT_MIN: "8080"
+      PUBLIC_PORT_MAX: "8099"
+      PUBLIC_TLS_PORT_MIN: "8443"
+      PUBLIC_TLS_PORT_MAX: "8459"
+    volumes:
+      - nginx-generated:/etc/nginx/generated
+      - nginx-certs:/etc/nginx/certs
+      - nginx-runtime:/etc/nginx/runtime
+    pid: "service:nginx"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nginx:
+        condition: service_started
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  nginx-generated:
+  nginx-certs:
+  nginx-runtime:
